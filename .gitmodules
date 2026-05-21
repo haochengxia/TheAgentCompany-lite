@@ -1,0 +1,3 @@
+[submodule "TheAgentCompany"]
+	path = TheAgentCompany
+	url = https://github.com/TheAgentCompany/TheAgentCompany.git
