@@ -12,7 +12,7 @@ from harness import BaseHarness, OpenHandsHarness, DockerHarness
 
 logger = logging.getLogger(__name__)
 
-BASE_IMAGE = os.environ.get("TAC_BASE_IMAGE", "tac-base-image:latest")
+BASE_IMAGE = os.environ.get("TAC_BASE_IMAGE", "ghcr.io/illinoisdata/theagentcompany-lite-base:latest")
 
 
 def load_dependencies(harness: BaseHarness, task_dir: str | None = None) -> list[str]:
@@ -27,8 +27,7 @@ def load_dependencies(harness: BaseHarness, task_dir: str | None = None) -> list
 
     result = harness.run_command("cat /utils/dependencies.yml")
     assert result.exit_code == 0, f"Failed to load dependencies: {result.content}"
-    raw = result.content
-    lines = [l for l in raw.splitlines() if not l.lstrip().startswith("#")]
+    lines = [l for l in result.content.splitlines() if not l.lstrip().startswith("#")]
     dependencies = yaml.safe_load("\n".join(lines)) or []
     return dependencies
 
@@ -218,6 +217,11 @@ if __name__ == "__main__":
 
         harness = DockerHarness(base_image=base_image or BASE_IMAGE)
         harness.start(mount_path=mount_path)
+
+    else:
+        raise ValueError(f"Unknown harness: {args.harness}")
+
+    assert isinstance(harness, BaseHarness)
 
     if task_dir:
         staging_dir = os.path.join(mount_path, "task_staging")

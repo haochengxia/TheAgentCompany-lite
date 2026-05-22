@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AgentState:
     success: bool = False
     trajectory_path: str = ""
-    history: list = None
+    history: list | None = None
 
 
 @dataclass
@@ -37,7 +37,7 @@ class BaseHarness(ABC):
         pass
 
     @abstractmethod
-    def run_command(self, command, timeout=300):
+    def run_command(self, command, timeout=300) -> CommandResult:
         pass
 
     def setup_task_files(self, task_dir):
@@ -104,7 +104,7 @@ class OpenHandsHarness(BaseHarness):
             except Exception:
                 pass
 
-    def run_command(self, command, timeout=300):
+    def run_command(self, command, timeout=300) -> CommandResult:
         if not self._runtime:
             return CommandResult(exit_code=1, content="Runtime not started")
         action = self._runtime.run_command(command)
@@ -113,6 +113,7 @@ class OpenHandsHarness(BaseHarness):
 
     def run_agent(self, instruction, max_iterations=100):
         from openhands.events.action import MessageAction
+        assert self._runtime is not None, "Runtime not started"
         self._runtime.send_action(MessageAction(content=instruction))
         for _ in range(max_iterations):
             state = self._runtime.get_state()

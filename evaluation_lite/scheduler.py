@@ -11,7 +11,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-TASKS_DIR = SCRIPT_DIR.parent / "workspaces" / "tasks"
+_TASKS_DIR_CANDIDATES = [
+    SCRIPT_DIR.parent / "workspaces" / "tasks",
+    SCRIPT_DIR.parent / "TheAgentCompany" / "workspaces" / "tasks",
+]
+TASKS_DIR = next((p for p in _TASKS_DIR_CANDIDATES if p.exists()), _TASKS_DIR_CANDIDATES[0])
 
 
 class MockConfig:
@@ -283,7 +287,14 @@ def main():
                         help="Mock mode (no LLM, simulated durations)")
     parser.add_argument("--mock-duration", type=str, default="10,30",
                         help="Mock duration range min,max")
+    parser.add_argument("--tasks-dir", type=str, default=None,
+                        help="Override tasks directory (default: auto-detect)")
     args = parser.parse_args()
+
+    if args.tasks_dir:
+        global TASKS_DIR
+        TASKS_DIR = Path(args.tasks_dir)
+    print(f"Tasks directory: {TASKS_DIR} (exists={TASKS_DIR.exists()})")
 
     if args.mock:
         parts = args.mock_duration.split(",")
@@ -298,7 +309,8 @@ def main():
     groups = group_tasks_by_deps(task_names)
     total_tasks = sum(len(v) for v in groups.values())
 
-    instance_manager_ref = {"manager": None}
+    instance_manager_ref: dict = {"manager": None}
+    full_stack_ids = [0]
     if args.num_instances > 1:
         from service_manager import ServiceManager
         full_stack_ids = [int(x) for x in args.full_stack_ids.split(",") if x]
