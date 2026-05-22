@@ -162,22 +162,37 @@ class DockerHarness(BaseHarness):
 class OpenHandsHarness(BaseHarness):
 
     def __init__(self, base_image, llm_config=None, task_short_name="task",
-                 verbose=False):
+                 verbose=False, config=None):
         self.base_image = base_image
         self.llm_config = llm_config
         self.task_short_name = task_short_name
         self.verbose = verbose
+        self.config = config
         self._runtime = None
+        self._state = None
 
     def start(self, mount_path=None):
+        from openhands.core.config import OpenHandsConfig, SandboxConfig
         from openhands.core.main import create_runtime
-        runtime = create_runtime(
-            config=self.llm_config,
-            sid=f"tac-eval-{self.task_short_name}-{int(time.time()%100000)}",
-            base_container_image=self.base_image,
+        from openhands.utils.async_utils import call_async_from_sync
+        config = OpenHandsConfig(
+            run_as_openhands=False,
+            max_iterations=100,
+            save_trajectory_path=os.path.join(mount_path or "", f"traj_{self.task_short_name}.json") if mount_path else None,
+            workspace_mount_path=mount_path,
+            workspace_mount_path_in_sandbox="/outputs",
+            sandbox=SandboxConfig(
+                base_container_image=self.base_image,
+                use_host_network=True,
+                timeout=300,
+            ),
         )
-        runtime.connect()
+        config.set_llm_config(self.llm_config)
+        runtime = create_runtime(config=config)
+        call_async_from_sync(runtime.connect)
         self._runtime = runtime
+        self.config = config
+        self._mount_path = mount_path
 
     def stop(self):
         if self._runtime:
@@ -189,25 +204,44 @@ class OpenHandsHarness(BaseHarness):
     def run_command(self, command, timeout=300) -> CommandResult:
         if not self._runtime:
             return CommandResult(exit_code=1, content="Runtime not started")
-        action = self._runtime.run_command(command)
-        return CommandResult(exit_code=action.exit_code,
-                             content=action.content)
+        from openhands.events.action import CmdRunAction
+        action = CmdRunAction(command=command)
+        action.set_hard_timeout(timeout)
+        obs = self._runtime.run(action)
+        return CommandResult(exit_code=getattr(obs, 'exit_code', -1),
+                             content=getattr(obs, 'content', ''))
 
     def run_agent(self, instruction, max_iterations=100):
+        import asyncio
         from openhands.events.action import MessageAction
-        assert self._runtime is not None, "Runtime not started"
-        self._runtime.send_action(MessageAction(content=instruction))
-        seen = 0
-        for i in range(max_iterations):
-            self._runtime.step()
-            state = self._runtime.get_state()
-            if state and state.history and self.verbose:
-                for event in state.history[seen:]:
-                    try:
-                        _print_event(event)
-                    except Exception:
-                        pass
-                seen = len(state.history)
-            if state and state.success:
-                return state
+        from openhands.core.main import run_controller
+
+        self.config.max_iterations = max_iterations
+
+        def _fake_user_response(state):
+            if state and state.history:
+                user_msgs = [e for e in state.history
+                             if hasattr(e, 'source') and e.source == 'user']
+                if len(user_msgs) >= 2:
+                    return ("Please continue working on the task. "
+                            "If you want to give up, run: <execute_bash> exit </execute_bash>.\n")
+            return ("Please continue working on the task on whatever approach "
+                    "you think is suitable.\n"
+                    "IMPORTANT: YOU SHOULD NEVER ASK FOR HUMAN HELP.\n")
+
+        state = asyncio.run(run_controller(
+            config=self.config,
+            initial_user_action=MessageAction(content=instruction),
+            runtime=self._runtime,
+            fake_user_response_fn=_fake_user_response,
+        ))
+
+        if self.verbose and state and state.history:
+            for event in state.history:
+                try:
+                    _print_event(event)
+                except Exception:
+                    pass
+
+        self._state = state
         return state
