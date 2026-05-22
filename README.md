@@ -57,13 +57,14 @@ Dependencies → Groups → Rounds → Instance Assignment → Sequential Execut
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `scheduler.py` | 379 | Round-based parallel scheduler: group → round → load-balance → execute |
+| `scheduler.py` | 391 | Round-based parallel scheduler: group → round → load-balance → execute |
 | `service_manager.py` | 81 | Multi-instance service management (acquire/release, port mapping) |
-| `harness.py` | 122 | DockerHarness (custom agents) and OpenHandsHarness (original runtime) |
-| `run_eval.py` | 274 | Single task execution: init → solve → evaluate → collect results |
+| `harness.py` | 123 | DockerHarness (custom agents) and OpenHandsHarness (original runtime) |
+| `run_eval.py` | 278 | Single task execution: init → solve → evaluate → collect results |
 | `run_eval_mock.py` | 124 | Mock executor for infrastructure testing (no LLM needed) |
+| `browsing.py` | 272 | Browser automation for pre-login to services (GitLab, RocketChat, etc.) |
 
-**Total: 980 lines**
+**Total: 1269 lines**
 
 ## Usage
 

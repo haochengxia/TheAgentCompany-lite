@@ -90,7 +90,7 @@ def run_task(task_name, agent_llm_config, env_llm_config, outputs_path,
             if service_instance:
                 cmd += ["--service-instance", json.dumps(service_instance)]
         else:
-            cmd = [sys.executable, "-m", "poetry", "run", "python",
+            cmd = [sys.executable,
                    str(Path(script_dir) / "run_eval.py"),
                    "--task-dir", task_dir, "--agent-llm-config", agent_llm_config,
                    "--env-llm-config", env_llm_config, "--outputs-path", outputs_path,
