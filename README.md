@@ -54,8 +54,10 @@ Or manually:
 ```bash
 git submodule update --init --recursive
 uv sync --extra openhands  # requires Python >=3.12
-docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest
+docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest || make build-base
 ```
+
+> **Note**: If `docker pull` fails (private registry or no access), `make build-base` builds the image locally from source (~5 min first time).
 
 ## Usage
 
@@ -101,8 +103,9 @@ evaluation_lite/
 
 | Target | Description |
 |--------|-------------|
-| `make setup` | Init submodule, install base deps, pull docker image |
+| `make setup` | Init submodule, install base deps, pull/build docker image |
 | `make setup-full` | Same + openhands (Python >=3.12) |
+| `make build-base` | Build base image locally (~5 min) |
 | `make mock` | Run mock benchmark |
 | `make dry-run` | Print execution plan |
 | `make single TASK=name` | Run one task |

@@ -140,13 +140,13 @@ The gap between theoretical 6x and actual 2.5x comes from gitlab reset overhead 
 
 **Lite**: One shared base image with a three-stage build:
 
-1. **Base image** (`ghcr.io/illinoisdata/theagentcompany-lite-base:latest`, ~350 MB) — Python 3.12 + common libraries + NPC setup + evaluation utilities. Contains ONBUILD directives for task files.
+1. **Base image** (`ghcr.io/illinoisdata/theagentcompany-lite-base:latest`, ~1.2 GB) — Python 3.12 (Debian Bookworm) + common libraries + NPC setup + evaluation utilities. Contains ONBUILD directives for task files.
 
 2. **Task image** (`tac-task-{name}:latest`, built on first run per task) — Layers task-specific files (evaluator, dependencies, task.md) on top of base image via the ONBUILD mechanism. Uses the task directory's own Dockerfile but rewrites `FROM` to point at the lite base image.
 
 3. **Runtime image** (`tac-runtime-{name}:latest`, built on first run per task) — Layers OpenHands runtime (micromamba, poetry, playwright, chromium) on top of the task image. Cached locally after first build.
 
-Disk usage: **~350 MB** for the base image + ~2.5 GB per task runtime image (cached).
+Disk usage: **~1.2 GB** for the base image + ~2.5 GB per task runtime image (cached).
 
 ## File Responsibilities
 
@@ -163,7 +163,7 @@ service_manager.py (~80 lines)
 ├── ServiceInstance             — dataclass: id, services, ports, lock
 └── ServiceManager              — thread-safe acquire/release/lookup
 
-harness.py (~345 lines)
+harness.py (~375 lines)
 ├── BaseHarness (ABC)           — interface: start/stop/run_agent/run_command
 ├── DockerHarness               — plain Docker, for custom agents
 └── OpenHandsHarness            — wraps OpenHands 0.42.0 runtime
@@ -171,11 +171,12 @@ harness.py (~345 lines)
     ├── _build_runtime_image()  — pre-build OpenHands runtime (skip internal build)
     ├── start()                 — connect to OpenHands Docker runtime
     ├── run_agent()             — execute task via run_controller
-    └── run_command()           — run bash command in container
+    └── run_command()           — docker exec directly into container
 
-run_eval.py (~293 lines)
+run_eval.py (~392 lines)
 ├── load_dependencies()         — read from host or container
 ├── init_task_env()             — set env vars, run init.sh
+├── ensure_services()           — start docker-compose services on demand
 ├── run_solver()                — send instruction to agent
 ├── run_evaluator()             — run eval.py inside container
 └── main()                      — single task CLI

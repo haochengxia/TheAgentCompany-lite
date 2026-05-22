@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 config.toml
+outputs/
+outputs_mock/
+uv.lock
+*.tar.gz
