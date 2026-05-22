@@ -179,10 +179,17 @@ def run_evaluator(harness: BaseHarness, llm_api_key: str | None,
         f"DECRYPTION_KEY='theagentcompany is all you need' "
         f"python_default /utils/eval.py --trajectory_path {trajectory_path} --result_path {result_path}"
     )
-    result = harness.run_command(command, timeout=600)
+    logger.info(f"Running evaluator: trajectory_path={trajectory_path}, result_path={result_path}")
+    for attempt in range(3):
+        result = harness.run_command(command, timeout=600)
+        if result.exit_code == 0:
+            break
+        if attempt < 2:
+            import time
+            time.sleep(5)
+    logger.info(f"Evaluator result: exit_code={result.exit_code}, content_len={len(result.content)}")
     if result.exit_code != 0:
         logger.warning(f"Evaluator in container failed (exit={result.exit_code}): {result.content[:500]}")
-        logger.info("Evaluator result will be empty — task output is still saved in state file")
 
 
 def _build_port_overrides(service_instance: dict | None) -> dict | None:
@@ -354,13 +361,20 @@ if __name__ == "__main__":
                        save_screenshots=True,
                        screenshots_dir=os.path.join(outputs_path, "screenshots"))
 
+    traj_tmp = os.path.join(tempfile.gettempdir(), f"traj_{task_short_name}.json")
+    traj_in_mount = os.path.join(mount_path, f"traj_{task_short_name}.json")
+    if os.path.exists(traj_tmp):
+        try:
+            shutil.copy2(traj_tmp, traj_in_mount)
+        except PermissionError:
+            subprocess.run(["sudo", "cp", traj_tmp, traj_in_mount], check=True)
+
     trajectory_path = f"/outputs/traj_{task_short_name}.json"
     result_path = f"/outputs/eval_{task_short_name}.json"
 
     run_evaluator(harness, env_api_key, env_base_url, env_model,
                   trajectory_path, result_path)
 
-    traj_tmp = os.path.join(tempfile.gettempdir(), f"traj_{task_short_name}.json")
     if os.path.exists(traj_tmp):
         shutil.copy2(traj_tmp, os.path.join(outputs_path, f"traj_{task_short_name}.json"))
 

@@ -239,6 +239,9 @@ class OpenHandsHarness(BaseHarness):
         d = tempfile.mkdtemp(prefix="oh_runtime_")
         try:
             prep_build_folder(d, base_image, BuildFromImageType.SCRATCH, None)
+            dockerfile_path = os.path.join(d, "Dockerfile")
+            with open(dockerfile_path, "a") as f:
+                f.write('RUN pip install "setuptools<70"\n')
             logger.info(f"Building OpenHands runtime image {tag} (first run takes 10-20 min)...")
             result = subprocess.run(
                 ["docker", "buildx", "build", "--progress=plain",
@@ -271,6 +274,7 @@ class OpenHandsHarness(BaseHarness):
             base_container_image=effective_base,
             use_host_network=True,
             timeout=300,
+            keep_runtime_alive=True,
         )
         if runtime_image:
             sandbox.runtime_container_image = runtime_image
@@ -301,10 +305,28 @@ class OpenHandsHarness(BaseHarness):
     def run_command(self, command, timeout=300) -> CommandResult:
         if not self._runtime:
             return CommandResult(exit_code=1, content="Runtime not started")
+        try:
+            container = getattr(self._runtime, 'container', None)
+            if container:
+                exec_result = container.exec_run(
+                    cmd=["/bin/bash", "-c", command],
+                    demux=True,
+                    workdir="/workspace",
+                )
+                exit_code = exec_result.exit_code
+                stdout = (exec_result.output[0] or b"").decode("utf-8", errors="replace")
+                stderr = (exec_result.output[1] or b"").decode("utf-8", errors="replace")
+                content = stdout + stderr
+                return CommandResult(exit_code=exit_code, content=content)
+        except Exception:
+            pass
         from openhands.events.action import CmdRunAction
         action = CmdRunAction(command=command)
         action.set_hard_timeout(timeout)
-        obs = self._runtime.run(action)
+        try:
+            obs = self._runtime.run(action)
+        except Exception as e:
+            return CommandResult(exit_code=-1, content=str(e))
         return CommandResult(exit_code=getattr(obs, 'exit_code', -1),
                              content=getattr(obs, 'content', ''))
 
