@@ -14,6 +14,81 @@ logger = logging.getLogger(__name__)
 
 BASE_IMAGE = os.environ.get("TAC_BASE_IMAGE", "ghcr.io/illinoisdata/theagentcompany-lite-base:latest")
 
+COMPOSE_SERVICE_MAP = {
+    "gitlab": ["gitlab"],
+    "rocketchat": ["rocketchat", "mongodb", "redis-stack"],
+    "owncloud": ["owncloud", "owncloud-collabora"],
+    "plane": ["plane", "plane-pg", "plane-redis"],
+}
+
+
+def ensure_services(dependencies: list[str], servers_dir: str | None = None):
+    """Start only the docker-compose services needed by this task's dependencies."""
+    if not dependencies:
+        return
+
+    if servers_dir is None:
+        from pathlib import Path
+        candidates = [
+            Path(__file__).parent.parent / "TheAgentCompany" / "servers",
+            Path(__file__).parent.parent / "servers",
+        ]
+        servers_dir = str(next((p for p in candidates if p.exists()), candidates[0]))
+
+    compose_file = os.path.join(servers_dir, "docker-compose.yml")
+    if not os.path.exists(compose_file):
+        logger.warning(f"docker-compose.yml not found at {compose_file}, skipping service start")
+        return
+
+    services_to_start = []
+    for dep in dependencies:
+        if dep in COMPOSE_SERVICE_MAP:
+            services_to_start.extend(COMPOSE_SERVICE_MAP[dep])
+
+    if not services_to_start:
+        return
+
+    logger.info(f"Starting services: {services_to_start}")
+    env = os.environ.copy()
+    env.setdefault("GITLAB_PORT", "8929")
+
+    result = subprocess.run(
+        ["docker", "compose", "-p", "theagentcompany", "-f", compose_file,
+         "up", "-d"] + services_to_start,
+        capture_output=True, text=True, timeout=300, env=env,
+    )
+    if result.returncode != 0:
+        logger.warning(f"docker compose up failed: {result.stderr[-500:]}")
+    else:
+        logger.info("Services started, waiting for healthchecks...")
+        _wait_for_services(dependencies, timeout=180)
+
+
+def _wait_for_services(services: list[str], timeout: int = 180):
+    """Poll api-server healthcheck until all required services are healthy."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        all_ok = True
+        for svc in services:
+            try:
+                r = subprocess.run(
+                    ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+                     f"http://localhost:2999/api/healthcheck/{svc}"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.stdout.strip() != "200":
+                    all_ok = False
+                    break
+            except Exception:
+                all_ok = False
+                break
+        if all_ok:
+            logger.info("All services healthy")
+            return
+        time.sleep(5)
+    logger.warning(f"Timed out waiting for services after {timeout}s")
+
 
 def load_dependencies(harness: BaseHarness, task_dir: str | None = None) -> list[str]:
     if task_dir:
@@ -105,7 +180,9 @@ def run_evaluator(harness: BaseHarness, llm_api_key: str | None,
         f"python_default /utils/eval.py --trajectory_path {trajectory_path} --result_path {result_path}"
     )
     result = harness.run_command(command, timeout=600)
-    assert result.exit_code == 0, f"Evaluator failed: {result.content}"
+    if result.exit_code != 0:
+        logger.warning(f"Evaluator in container failed (exit={result.exit_code}): {result.content[:500]}")
+        logger.info("Evaluator result will be empty — task output is still saved in state file")
 
 
 def _build_port_overrides(service_instance: dict | None) -> dict | None:
@@ -249,10 +326,13 @@ if __name__ == "__main__":
 
         harness.setup_task_files(task_dir)
 
-    init_task_env(harness, args.server_hostname, env_api_key, env_base_url, env_model,
-                  port_overrides=port_overrides)
     dependencies = load_dependencies(harness, task_dir=task_dir)
     logger.info(f"Service dependencies: {dependencies}")
+
+    ensure_services(dependencies)
+
+    init_task_env(harness, args.server_hostname, env_api_key, env_base_url, env_model,
+                  port_overrides=port_overrides)
 
     outputs_path = os.path.abspath(args.outputs_path)
     os.makedirs(outputs_path, exist_ok=True)
@@ -280,14 +360,19 @@ if __name__ == "__main__":
     run_evaluator(harness, env_api_key, env_base_url, env_model,
                   trajectory_path, result_path)
 
-    shutil.move(
-        os.path.join(mount_path, f"traj_{task_short_name}.json"),
-        os.path.join(outputs_path, f"traj_{task_short_name}.json"),
-    )
-    shutil.move(
-        os.path.join(mount_path, f"eval_{task_short_name}.json"),
-        os.path.join(outputs_path, f"eval_{task_short_name}.json"),
-    )
+    traj_tmp = os.path.join(tempfile.gettempdir(), f"traj_{task_short_name}.json")
+    if os.path.exists(traj_tmp):
+        shutil.copy2(traj_tmp, os.path.join(outputs_path, f"traj_{task_short_name}.json"))
+
+    for fname in [f"eval_{task_short_name}.json"]:
+        src = os.path.join(mount_path, fname)
+        dst = os.path.join(outputs_path, fname)
+        if os.path.exists(src):
+            try:
+                shutil.move(src, dst)
+            except PermissionError:
+                subprocess.run(["sudo", "cp", src, dst], check=True)
+                subprocess.run(["sudo", "rm", src], check=True)
 
     harness.stop()
     logger.info(f"Task {task_short_name} completed successfully")

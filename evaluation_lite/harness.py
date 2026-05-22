@@ -275,10 +275,11 @@ class OpenHandsHarness(BaseHarness):
         if runtime_image:
             sandbox.runtime_container_image = runtime_image
 
+        traj_path = os.path.join(tempfile.gettempdir(), f"traj_{self.task_short_name}.json")
         config = OpenHandsConfig(
             run_as_openhands=False,
             max_iterations=100,
-            save_trajectory_path=os.path.join(mount_path or "", f"traj_{self.task_short_name}.json") if mount_path else None,
+            save_trajectory_path=traj_path,
             workspace_mount_path=mount_path,
             workspace_mount_path_in_sandbox="/outputs",
             sandbox=sandbox,
@@ -340,4 +341,13 @@ class OpenHandsHarness(BaseHarness):
                     pass
 
         self._state = state
+
+        if self.config.save_trajectory_path and os.path.exists(self.config.save_trajectory_path):
+            if self._mount_path:
+                dest = os.path.join(self._mount_path, f"traj_{self.task_short_name}.json")
+                try:
+                    shutil.copy2(self.config.save_trajectory_path, dest)
+                except PermissionError:
+                    subprocess.run(["sudo", "cp", self.config.save_trajectory_path, dest], check=True)
+
         return state

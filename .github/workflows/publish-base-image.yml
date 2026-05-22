@@ -52,6 +52,8 @@ jobs:
         run: |
           sed -i 's|^FROM python:3.12$|FROM python:3.12-slim-bookworm|' \
             TheAgentCompany/workspaces/base_image/Dockerfile
+          sed -i '/RUN pip install litellm==1.23.16/a RUN pip install "setuptools<70"' \
+            TheAgentCompany/workspaces/base_image/Dockerfile
 
       - name: Build and push
         uses: docker/build-push-action@v6
