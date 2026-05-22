@@ -11,7 +11,7 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -30,6 +30,26 @@ jobs:
 
       - name: Build base image
         run: make build-base
+
+      - name: Setup /etc/hosts
+        run: echo "127.0.0.1 the-agent-company.com" | sudo tee -a /etc/hosts
+
+      - name: Start gitlab service
+        if: ${{ github.event.inputs.task != 'ds-sql-exercise' }}
+        run: |
+          export GITLAB_PORT=8929
+          docker compose -p theagentcompany \
+            -f TheAgentCompany/servers/docker-compose.yml \
+            up -d gitlab
+          echo "Waiting for gitlab to be healthy..."
+          for i in $(seq 1 36); do
+            if curl -sf http://the-agent-company.com:8929/ > /dev/null 2>&1; then
+              echo "GitLab is up!"
+              break
+            fi
+            echo "  waiting... ($i/36)"
+            sleep 10
+          done
 
       - name: Write config.toml
         run: |
@@ -53,9 +73,11 @@ jobs:
             --task ${{ github.event.inputs.task }} \
             --agent-llm-config agent --env-llm-config env \
             --server-hostname localhost \
+            --verbose \
             --outputs-path ./outputs
 
       - name: Check results
+        if: always()
         run: |
           echo "=== Output files ==="
           ls -la ./outputs/ || true
@@ -63,15 +85,29 @@ jobs:
           echo "=== Eval result ==="
           cat ./outputs/eval_*.json || echo "No eval file found"
           echo ""
-          echo "=== State file size ==="
-          wc -c ./outputs/state_*.json || true
-          echo ""
-          echo "=== Trajectory file size ==="
-          wc -c ./outputs/traj_*.json || true
+          echo "=== Agent transcript ==="
+          TRAJ=$(ls ./outputs/traj_*.json 2>/dev/null | head -1)
+          if [ -n "$TRAJ" ]; then
+            python3 -c "
+          import json, sys
+          with open('$TRAJ') as f:
+              traj = json.load(f)
+          for ev in traj:
+              src = ev.get('source', '')
+              action = ev.get('action', '')
+              content = ev.get('content', '') or ev.get('command', '') or ev.get('thought', '') or ''
+              content = content.replace('\n', ' ')[:300]
+              if src == 'agent' or action in ('run', 'message', 'finish'):
+                  tag = 'THINK' if action == 'message' and src == 'agent' else action.upper()
+                  print(f'[{tag}] {content}')
+          " || true
+          else
+            echo "No trajectory file"
+          fi
 
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-outputs
+          name: e2e-outputs-${{ github.event.inputs.task }}
           path: outputs/
