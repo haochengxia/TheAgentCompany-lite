@@ -329,7 +329,11 @@ if __name__ == "__main__":
                 shutil.rmtree(staging_dir)
             except PermissionError:
                 subprocess.run(["sudo", "rm", "-rf", staging_dir], check=True)
-        shutil.copytree(task_dir, staging_dir)
+        try:
+            shutil.copytree(task_dir, staging_dir)
+        except PermissionError:
+            subprocess.run(["sudo", "mkdir", "-p", staging_dir], check=True)
+            subprocess.run(["sudo", "cp", "-r", os.path.join(task_dir, "."), staging_dir], check=True)
 
         harness.setup_task_files(task_dir)
 
