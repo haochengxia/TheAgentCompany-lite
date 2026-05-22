@@ -131,7 +131,7 @@ Instance layout:
 
 ```bash
 uv run python evaluation_lite/run_eval.py \
-  --task-dir workspaces/tasks/gitlab-create-repo-1 \
+  --task gitlab-create-repo-1 \
   --agent-llm-config agent \
   --env-llm-config env \
   --server-hostname localhost \

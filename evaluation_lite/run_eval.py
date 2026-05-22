@@ -124,10 +124,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="TheAgentCompany V2 - Single task evaluation")
+    parser.add_argument("--task", type=str, default=None,
+                        help="Task name (e.g. gitlab-create-repo-1). Auto-resolves to task dir.")
     parser.add_argument("--task-dir", type=str, default=None,
-                        help="Path to task directory (v2 mode)")
+                        help="Path to task directory (overrides --task)")
     parser.add_argument("--task-image-name", type=str, default=None,
-                        help="(Legacy v1) Task image name. Ignored if --task-dir is provided.")
+                        help="(Legacy v1) Task image name. Ignored if --task or --task-dir is provided.")
     parser.add_argument("--outputs-path", type=str, default="./outputs",
                         help="Folder path to save trajectories and evaluation results")
     parser.add_argument("--server-hostname", type=str, default="localhost",
@@ -154,18 +156,28 @@ if __name__ == "__main__":
 
     port_overrides = _build_port_overrides(service_instance)
 
+    task_dir = None
     if args.task_dir:
         task_dir = os.path.abspath(args.task_dir)
+    elif args.task:
+        from pathlib import Path
+        script_dir = Path(__file__).parent
+        candidates = [
+            script_dir.parent / "workspaces" / "tasks" / args.task,
+            script_dir.parent / "TheAgentCompany" / "workspaces" / "tasks" / args.task,
+        ]
+        task_dir = str(next((p for p in candidates if p.exists()), candidates[-1]))
+
+    if task_dir:
         task_short_name = os.path.basename(task_dir).replace("-image", "")
         base_image = args.base_image or BASE_IMAGE
         logger.info(f"V2 mode: task_dir={task_dir}, short_name={task_short_name}")
     elif args.task_image_name:
         base_image = args.task_image_name
         task_short_name = args.task_image_name.split("/")[-1].split(":")[0]
-        task_dir = None
         logger.info(f"V1 compat mode: image={base_image}, short_name={task_short_name}")
     else:
-        raise ValueError("Must provide either --task-dir (v2) or --task-image-name (v1)")
+        raise ValueError("Must provide --task, --task-dir, or --task-image-name")
 
     env_api_key = None
     env_base_url = None
