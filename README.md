@@ -66,59 +66,88 @@ Dependencies → Groups → Rounds → Instance Assignment → Sequential Execut
 
 **Total: 1269 lines**
 
+## Quick Start
+
+```bash
+git clone git@github.com:illinoisdata/TheAgentCompany-lite.git && cd TheAgentCompany-lite
+
+# One-command setup: submodule + uv deps + docker base image
+make setup                # base (mock mode + scheduler)
+# or
+make setup-full           # full (includes openhands for real benchmark, requires Python >=3.12)
+
+# Run mock benchmark (no LLM, no services needed)
+make mock
+
+# See execution plan without running
+make dry-run
+
+# Run a single task
+make single TASK=admin-arrange-meeting-rooms
+```
+
+See [docs/SETUP.md](docs/SETUP.md) for full setup instructions including service deployment and multi-instance configuration.
+
 ## Usage
 
 ### Prerequisites
 
-- Docker + Docker Compose
-- TheAgentCompany services running (gitlab, rocketchat, owncloud, plane)
-- Python 3.10+ with `pyyaml`
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- Docker + Docker Compose (for real benchmark)
+- TheAgentCompany services running (gitlab, rocketchat, owncloud, plane) — see [docs/SETUP.md](docs/SETUP.md)
 
-### Install (with uv)
-
-```bash
-# Base install (mock mode, scheduler)
-uv sync
-
-# With OpenHands (real benchmark, requires Python >=3.12)
-uv sync --extra openhands
-```
-
-### Install (without uv)
+### Install
 
 ```bash
+# With uv (recommended)
+uv sync                           # base: mock mode + scheduler
+uv sync --extra openhands         # full: real benchmark (requires Python >=3.12)
+
+# Without uv
 pip install pyyaml
 pip install openhands-ai==0.42.0  # only needed for real benchmark
 ```
 
-### Dry Run (see the plan without executing)
+### Mock Mode (no LLM, no services needed)
 
 ```bash
 uv run python evaluation_lite/scheduler.py \
-  --agent-llm-config agent \
-  --env-llm-config env \
+  --agent-llm-config agent --env-llm-config env \
+  --mock --mock-duration 5,8 \
+  --outputs-path ./outputs_mock
+```
+
+### Dry Run (see the plan)
+
+```bash
+uv run python evaluation_lite/scheduler.py \
+  --agent-llm-config agent --env-llm-config env \
   --dry-run
 ```
 
-### Mock Mode (infrastructure testing, no LLM)
+### Specific Tasks
 
 ```bash
+# Single task by name
+uv run python evaluation_lite/run_eval.py \
+  --task admin-arrange-meeting-rooms \
+  --agent-llm-config agent --env-llm-config env \
+  --server-hostname localhost --outputs-path ./outputs
+
+# Multiple tasks via scheduler
 uv run python evaluation_lite/scheduler.py \
-  --agent-llm-config agent \
-  --env-llm-config env \
-  --mock --mock-duration 5,8 \
-  --outputs-path /mydata/mock_test
+  --agent-llm-config agent --env-llm-config env \
+  --tasks "admin-arrange-meeting-rooms,pm-update-project-milestones" \
+  --mock --mock-duration 5,8 --outputs-path ./outputs_mock
 ```
 
 ### Multi-Instance (6 instances)
 
 ```bash
 uv run python evaluation_lite/scheduler.py \
-  --agent-llm-config agent \
-  --env-llm-config env \
+  --agent-llm-config agent --env-llm-config env \
   --server-hostname tac_test \
-  --num-instances 6 \
-  --full-stack-ids 0,4,5 \
+  --num-instances 6 --full-stack-ids 0,4,5 \
   --outputs-path /mydata/benchmark_run
 ```
 
@@ -126,17 +155,6 @@ Instance layout:
 - **Instance 0**: full stack (all services) — port base 8929
 - **Instances 1–3**: gitlab-only — ports 18929, 28929, 38929
 - **Instances 4–5**: full stack — ports 48929, 58929
-
-### Single Task (debugging)
-
-```bash
-uv run python evaluation_lite/run_eval.py \
-  --task gitlab-create-repo-1 \
-  --agent-llm-config agent \
-  --env-llm-config env \
-  --server-hostname localhost \
-  --outputs-path ./outputs
-```
 
 ### Custom Tasks Directory
 
@@ -155,5 +173,5 @@ Key differences:
 - **Parallel scheduling** — dependency-aware round-based execution (was: serial)
 - **Service reuse** — reset between tasks instead of destroy/recreate containers
 - **Mock testing** — validate infrastructure without LLM costs
-- **980 lines** vs upstream 698 lines (but with scheduler, multi-instance, mock on top)
+- **1269 lines** vs upstream 698 lines (scheduler, multi-instance, mock, browsing on top)
 
