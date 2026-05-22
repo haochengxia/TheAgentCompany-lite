@@ -48,6 +48,11 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Patch Dockerfile for Debian Bookworm
+        run: |
+          sed -i 's|^FROM python:3.12$|FROM python:3.12-slim-bookworm|' \
+            TheAgentCompany/workspaces/base_image/Dockerfile
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:

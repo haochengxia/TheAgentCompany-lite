@@ -35,20 +35,10 @@ docker --version          # 24+
 docker compose version    # v2+
 
 # Python (required)
-python3 --version         # 3.10+
+python3 --version         # 3.12+ (required by OpenHands)
 
-# Poetry (for upstream baseline only)
-poetry --version          # 1.7+
-
-# SSH access (if server runs on a remote machine)
-ssh your-server-hostname
-```
-
-### Python Dependencies
-
-```bash
-pip install pyyaml        # Required for scheduler and run_eval
-pip install openhands-ai==0.42.0  # Required only for OpenHands harness
+# uv (package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ### LLM API Keys
@@ -58,18 +48,21 @@ You need two LLM configs (can point to the same model):
 - **Agent LLM**: the model that solves tasks
 - **Environment LLM**: used by NPCs and evaluators (typically a cheaper model)
 
-Set up in OpenHands `config.toml`:
+Create `config.toml` in the project root:
+
 ```toml
 [llm.agent]
-api_key = "your-api-key"
-model = "gpt-4o-mini"
-base_url = "https://api.openai.com/v1"    # or your proxy
-
-[llm.env]
-api_key = "your-api-key"
 model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
+api_key = "sk-..."
+
+[llm.env]
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-..."
 ```
+
+`config.toml` is gitignored — your API keys stay local.
 
 ---
 
@@ -94,51 +87,14 @@ bash setup.sh
 
 `setup.sh` pulls ~15 Docker images, starts the api-server on port 2999, and waits for all services to become healthy (~2-3 minutes for GitLab).
 
-### Manual Step-by-Step
-
-If `setup.sh` doesn't work for your environment:
-
-```bash
-cd TheAgentCompany/servers
-
-# Start core services via docker compose
-GITLAB_PORT=8929 docker compose -p theagentcompany up -d
-
-# Start Plane (separate compose)
-make init HOSTNAME=localhost
-make start-plane
-
-# Start RocketChat NPC data population
-make start-rocketchat
-
-# Start Redis for sotopia NPCs
-make start-sotopia-redis
-
-# Start the api-server (manages resets)
-docker run -d \
-    --name api-server \
-    --network host \
-    --restart always \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    ghcr.io/theagentcompany/servers-api-server:1.0.0
-```
-
 ### Verify Services
 
 ```bash
-# Check all services via api-server
 for svc in gitlab rocketchat owncloud plane; do
     curl -s -o /dev/null -w "$svc: %{http_code}\n" localhost:2999/api/healthcheck/$svc
 done
-
-# Expected output:
-# gitlab: 200
-# rocketchat: 200
-# owncloud: 200
-# plane: 200
+# Expected: all return 200
 ```
-
-If any service returns non-200, check `docker ps` for crashed containers and `docker logs <container>` for errors.
 
 ### Service URLs & Credentials
 
@@ -148,11 +104,10 @@ If any service returns non-200, check `docker ps` for crashed containers and `do
 | RocketChat | http://the-agent-company.com:3000 | `theagentcompany` | `theagentcompany` |
 | ownCloud | http://the-agent-company.com:8092 | `theagentcompany` | `theagentcompany` |
 | Plane | http://the-agent-company.com:8091 | `agent@company.com` | `theagentcompany` |
-| api-server | http://localhost:2999 | — | — |
 
 ### Remote Server Setup
 
-If you're running services on a remote machine (e.g., `tac_test`):
+If services run on a remote machine:
 
 ```bash
 # On the remote server
@@ -166,35 +121,25 @@ echo "<server-ip> the-agent-company.com" | sudo tee -a /etc/hosts
 
 ## 3. Evaluation Environment
 
-### Prepare Workspace
-
-The scheduler reads tasks from `TheAgentCompany/workspaces/tasks/`. Ensure the submodule is initialized:
+### One-Line Setup
 
 ```bash
-cd TheAgentCompany-lite
+git clone git@github.com:illinoisdata/TheAgentCompany-lite.git && cd TheAgentCompany-lite
+make setup-full    # submodule + uv deps (with openhands) + docker base image
+```
+
+Or step by step:
+
+```bash
 git submodule update --init --recursive
+uv sync --extra openhands    # requires Python >=3.12
+docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest
 ```
 
-### Build the Base Image
-
-The lite evaluation uses a single shared base image instead of 175 task-specific images:
+### Verify Setup
 
 ```bash
-cd TheAgentCompany/workspaces/base_image
-docker build -t tac-base-image:latest .
-```
-
-This image contains:
-- Python 3.12 + common libraries
-- NPC setup (rocketchat API, sotopia, litellm)
-- Evaluation utilities (`/utils/eval.py`, `/utils/init.sh`, etc.)
-
-Task-specific files (`task.md`, `evaluator.py`, `dependencies.yml`) are mounted at runtime.
-
-### Verify Python Path
-
-```bash
-# The scheduler resolves TASKS_DIR relative to evaluation_lite/
+# Check tasks are available
 python3 -c "
 from pathlib import Path
 tasks = Path('TheAgentCompany/workspaces/tasks')
@@ -204,6 +149,15 @@ print(f'Task count: {sum(1 for d in tasks.iterdir() if d.is_dir()) if tasks.exis
 # Expected: Tasks exist: True, Task count: 175
 ```
 
+### Image Build (Automatic)
+
+On first run, the harness automatically builds two images per task:
+
+1. **Task image**: layers task files (evaluator, task.md) onto the base image. Takes ~5 seconds.
+2. **Runtime image**: layers OpenHands runtime (micromamba, poetry, playwright, chromium). Takes **10-20 minutes on first run**, then cached.
+
+Subsequent runs of the same task reuse the cached images instantly.
+
 ---
 
 ## 4. Mock Benchmark (Quick Validation)
@@ -211,78 +165,77 @@ print(f'Task count: {sum(1 for d in tasks.iterdir() if d.is_dir()) if tasks.exis
 Mock mode simulates task execution without LLM calls. Use this to verify your infrastructure before spending money on real benchmarks.
 
 ```bash
-python3 evaluation_lite/scheduler.py \
+make mock
+# or:
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent \
     --env-llm-config env \
     --mock --mock-duration 5,8 \
-    --outputs-path /tmp/mock_test
+    --outputs-path ./outputs_mock
 ```
 
-Expected output:
-```
-============================================================
-TheAgentCompany V2 - Smart Parallel Scheduler
-============================================================
-Total tasks: 175, Groups: 14
-
-Execution Plan:
-  Round 1/6: gitlab(47) || owncloud+rocketchat(33) || plane(6) || no-deps(3)
-  Round 2/6: owncloud(33) || rocketchat(24) || gitlab+plane(5)
-  Round 3/6: gitlab+rocketchat(15)
-  Round 4/6: plane+rocketchat(5) || gitlab+owncloud(2)
-  ...
-
-MOCK MODE: simulating 5-8s per task
-...
-COMPLETE: X passed, Y failed
-Total: X.X min (XXXs)
-```
+> **Note**: Mock mode does NOT require services to be running. It only simulates timing.
 
 ### Mock with Multiple Instances
 
 ```bash
-python3 evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent \
     --env-llm-config env \
     --mock --mock-duration 5,8 \
     --num-instances 6 --full-stack-ids 0,4,5 \
-    --outputs-path /tmp/mock_6inst
+    --outputs-path ./outputs_mock
 ```
-
-> **Note**: Mock mode does NOT require services to be running. It only simulates timing.
 
 ---
 
 ## 5. Single-Instance Benchmark
 
-This is the simplest real benchmark. All tasks run on one service stack.
+The simplest real benchmark. All tasks run on one service stack.
 
 ### Prerequisites
 
 - [x] Services running (Section 2)
-- [x] Base image built (Section 3)
-- [x] LLM API keys configured
+- [x] Environment set up (Section 3)
+- [x] LLM API keys in `config.toml`
 
 ### Dry Run First
 
 ```bash
-python3 evaluation_lite/scheduler.py \
+make dry-run
+# or:
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent \
     --env-llm-config env \
     --server-hostname localhost \
     --dry-run
 ```
 
-This prints the execution plan without running anything. Verify the round/group assignments look correct.
+This prints the execution plan without running anything.
 
-### Run
+### Run a Single Task
 
 ```bash
-python3 evaluation_lite/scheduler.py \
+make single TASK=ds-sql-exercise
+# or:
+uv run python evaluation_lite/run_eval.py \
+    --task ds-sql-exercise \
+    --agent-llm-config agent --env-llm-config env \
+    --server-hostname localhost \
+    --verbose \
+    --outputs-path ./outputs
+```
+
+The first run of any task takes 10-20 minutes to build the runtime image. Subsequent runs start in seconds.
+
+### Run Full Benchmark
+
+```bash
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent \
     --env-llm-config env \
     --server-hostname localhost \
-    --outputs-path /mydata/benchmark_1inst
+    --outputs-path ./outputs
 ```
 
 ### Monitor Progress
@@ -295,7 +248,7 @@ The scheduler prints real-time progress:
   Progress: 47/175 (26%) | 8.2 tasks/min | ETA: 15 min
 ```
 
-Results are saved incrementally. If the run crashes, re-running will skip tasks that already have `eval_*.json` results.
+Results are saved incrementally. If the run crashes, re-running will skip tasks that already have results.
 
 ---
 
@@ -311,13 +264,13 @@ Distributes tasks across N independent service stacks for parallelism.
 ### Run
 
 ```bash
-python3 evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent \
     --env-llm-config env \
     --server-hostname localhost \
     --num-instances 6 \
     --full-stack-ids 0,4,5 \
-    --outputs-path /mydata/benchmark_6inst
+    --outputs-path ./outputs
 ```
 
 This assumes you've already deployed instances 1-5 (see Section 7). The scheduler will:
@@ -329,7 +282,7 @@ This assumes you've already deployed instances 1-5 (see Section 7). The schedule
 
 ## 7. Multi-Instance Service Deployment
 
-Each instance is an independent set of service containers. You need to create docker-compose configs for instances 1-5.
+Each instance is an independent set of service containers.
 
 ### Instance Layout
 
@@ -344,14 +297,9 @@ Each instance is an independent set of service containers. You need to create do
 
 **Total RAM: ~33 GB**
 
-### Deploy Script
-
-Create a deployment script or use this manual approach:
+### Deploy GitLab-Only Instances (1-3)
 
 ```bash
-# Instance 0: already running from setup.sh (full stack on default ports)
-
-# For instances 1-3 (gitlab-only):
 for i in 1 2 3; do
     port=$((8929 + i * 10000))
     mkdir -p /tmp/tac-inst-$i
@@ -372,16 +320,11 @@ services:
 EOF
     docker compose -p tac-inst-$i -f /tmp/tac-inst-$i/docker-compose.yml up -d
 done
-
-# For instances 4-5 (full stack), you need all services:
-# Copy the original docker-compose.yml and adjust ALL port mappings.
-# This is more involved — see the template below.
 ```
 
 ### Full-Stack Instance Template (Instance 4)
 
 ```yaml
-# /tmp/tac-inst-4/docker-compose.yml
 services:
   gitlab:
     image: ghcr.io/theagentcompany/servers-gitlab:1.0.0
@@ -470,7 +413,6 @@ volumes:
 ### Verify All Instances
 
 ```bash
-# Check gitlab instances are healthy
 for i in 0 1 2 3 4 5; do
     port=$((8929 + i * 10000))
     curl -s -o /dev/null -w "Instance $i gitlab:$port → %{http_code}\n" \
@@ -488,8 +430,6 @@ To produce a fair comparison, run both evaluations with the same LLM config on t
 
 ```bash
 cd TheAgentCompany/evaluation
-
-# The upstream runs tasks serially using task images
 bash run_eval.sh \
     --agent-llm-config agent \
     --env-llm-config env \
@@ -499,28 +439,17 @@ bash run_eval.sh \
 
 This takes ~17.5 hours. It pulls 175 task images (~700 GB) and runs them serially.
 
-### Step 2: Run Lite (Single Instance)
+### Step 2: Run Lite
 
 ```bash
-python3 evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent \
     --env-llm-config env \
     --server-hostname localhost \
     --outputs-path /mydata/lite_1inst
 ```
 
-### Step 3: Run Lite (Multi-Instance)
-
-```bash
-python3 evaluation_lite/scheduler.py \
-    --agent-llm-config agent \
-    --env-llm-config env \
-    --server-hostname localhost \
-    --num-instances 6 --full-stack-ids 0,4,5 \
-    --outputs-path /mydata/lite_6inst
-```
-
-### Step 4: Compare Results
+### Step 3: Compare Results
 
 ```bash
 python3 -c "
@@ -533,8 +462,7 @@ def summarize(path, label):
     print(f'{label}: {d[\"passed\"]} passed, {d[\"failed\"]} failed, {hrs:.1f} hours')
 
 summarize('/mydata/upstream_baseline', 'Upstream')
-summarize('/mydata/lite_1inst', 'Lite 1-inst')
-summarize('/mydata/lite_6inst', 'Lite 6-inst')
+summarize('/mydata/lite_1inst', 'Lite')
 "
 ```
 
@@ -550,15 +478,15 @@ summarize('/mydata/lite_6inst', 'Lite 6-inst')
 
 ## 9. Troubleshooting
 
+### First run is slow (10-20 minutes per task)
+
+Expected on first run. The OpenHands runtime image (micromamba + poetry + playwright + chromium) is built once per task and cached locally. Subsequent runs start in seconds.
+
 ### Services won't start
 
 ```bash
-# Check what's running
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-
-# Check logs for a specific service
 docker logs gitlab --tail 50
-docker logs api-server --tail 50
 
 # Common fix: remove stale containers and restart
 docker compose -p theagentcompany down
@@ -567,70 +495,50 @@ bash setup.sh
 
 ### GitLab takes forever to start
 
-GitLab typically takes 2-3 minutes. If it takes longer than 5 minutes:
+GitLab typically takes 2-3 minutes. If longer:
 
 ```bash
-# Check GitLab logs
 docker logs gitlab --tail 100
-
-# Ensure hostname resolution works
 curl -v http://the-agent-company.com:8929/
-
-# If "the-agent-company.com" doesn't resolve:
 echo "127.0.0.1 the-agent-company.com" | sudo tee -a /etc/hosts
 ```
 
-### Task fails with "PermissionError" on output directory
-
-The evaluation creates files as root inside Docker containers. If you can't clean up:
+### "No module named 'openhands'"
 
 ```bash
-sudo rm -rf /mydata/benchmark_run/.tmp_*
+uv sync --extra openhands    # not: pip install openhands-ai
 ```
 
-The scheduler handles this automatically with `shutil.rmtree` fallback to `sudo rm`.
+### Runtime image build fails
+
+If the OpenHands runtime build fails (e.g., network timeout), remove the cached image and retry:
+
+```bash
+docker rmi tac-runtime-{task-name}:latest
+# Re-run the task — it will rebuild
+```
+
+### Disk space
+
+Runtime images use ~2.5 GB each. Clean up:
+
+```bash
+docker image prune -af    # remove all unused images
+```
 
 ### Port conflicts
 
-If you see "port is already allocated":
-
 ```bash
-# Find what's using the port
 sudo lsof -i :8929
-# or
-ss -tlnp | grep 8929
-
-# Stop conflicting containers
 docker stop $(docker ps -q --filter "publish=8929")
 ```
 
 ### Mock mode hangs
 
-Mock mode should complete in ~5-10 minutes. If it hangs:
-
 ```bash
-# Check for zombie processes
-ps aux | grep run_eval_mock
-
-# Kill stale processes
 pkill -f run_eval_mock
-
-# Re-run with verbose output
-python3 evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent --env-llm-config env \
     --mock --mock-duration 2,3 \
     --outputs-path /tmp/mock_debug
-```
-
-### OpenHands import errors
-
-If you see `ModuleNotFoundError: No module named 'openhands'`:
-
-```bash
-# OpenHands is only needed for the real (non-mock) benchmark
-pip install openhands-ai==0.42.0
-
-# Or use poetry (upstream's package manager)
-cd TheAgentCompany
-poetry install --only evaluation
 ```

@@ -138,17 +138,20 @@ The gap between theoretical 6x and actual 2.5x comes from gitlab reset overhead 
 
 **Original**: Each task has its own Docker image (175 images × ~4 GB = ~700 GB).
 
-**Lite**: One shared base image (`tac-base-image:latest`) with task files mounted at runtime:
-```python
-shutil.copytree(task_dir, staging_dir)  # mount task files into container
-```
+**Lite**: One shared base image with a three-stage build:
 
-Disk usage: **~4 GB** for the base image + minimal per-task output.
+1. **Base image** (`ghcr.io/illinoisdata/theagentcompany-lite-base:latest`, ~350 MB) — Python 3.12 + common libraries + NPC setup + evaluation utilities. Contains ONBUILD directives for task files.
+
+2. **Task image** (`tac-task-{name}:latest`, built on first run per task) — Layers task-specific files (evaluator, dependencies, task.md) on top of base image via the ONBUILD mechanism. Uses the task directory's own Dockerfile but rewrites `FROM` to point at the lite base image.
+
+3. **Runtime image** (`tac-runtime-{name}:latest`, built on first run per task) — Layers OpenHands runtime (micromamba, poetry, playwright, chromium) on top of the task image. Cached locally after first build.
+
+Disk usage: **~350 MB** for the base image + ~2.5 GB per task runtime image (cached).
 
 ## File Responsibilities
 
 ```
-scheduler.py (379 lines)
+scheduler.py (~390 lines)
 ├── group_tasks_by_deps()       — read dependencies.yml, group by tuple
 ├── find_non_overlapping_groups() — graph coloring → rounds
 ├── _split_groups_across_instances() — load-balance across instances
@@ -156,22 +159,27 @@ scheduler.py (379 lines)
 ├── _reset_services_for_group() — api-server or docker restart
 └── main()                      — CLI, orchestration, ProcessPoolExecutor
 
-service_manager.py (81 lines)
+service_manager.py (~80 lines)
 ├── ServiceInstance             — dataclass: id, services, ports, lock
 └── ServiceManager              — thread-safe acquire/release/lookup
 
-harness.py (122 lines)
+harness.py (~345 lines)
 ├── BaseHarness (ABC)           — interface: start/stop/run_agent/run_command
 ├── DockerHarness               — plain Docker, for custom agents
-└── OpenHandsHarness            — wraps OpenHands runtime (original behavior)
+└── OpenHandsHarness            — wraps OpenHands 0.42.0 runtime
+    ├── _build_task_image()     — build intermediate task image via ONBUILD
+    ├── _build_runtime_image()  — pre-build OpenHands runtime (skip internal build)
+    ├── start()                 — connect to OpenHands Docker runtime
+    ├── run_agent()             — execute task via run_controller
+    └── run_command()           — run bash command in container
 
-run_eval.py (274 lines)
+run_eval.py (~293 lines)
 ├── load_dependencies()         — read from host or container
 ├── init_task_env()             — set env vars, run init.sh
 ├── run_solver()                — send instruction to agent
 ├── run_evaluator()             — run eval.py inside container
 └── main()                      — single task CLI
 
-run_eval_mock.py (124 lines)
+run_eval_mock.py (~124 lines)
 └── main()                      — simulate execution with random sleep
 ```

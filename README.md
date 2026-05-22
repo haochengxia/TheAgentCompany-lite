@@ -15,11 +15,13 @@ See [docs/DESIGN.md](docs/DESIGN.md) for architecture and [docs/SETUP.md](docs/S
 
 ```bash
 git clone git@github.com:illinoisdata/TheAgentCompany-lite.git && cd TheAgentCompany-lite
-make setup       # submodule + uv deps + docker base image
+make setup-full  # submodule + uv deps (with openhands) + docker base image
 make mock        # mock benchmark (no LLM, no services needed)
 make dry-run     # see execution plan
-make single TASK=admin-arrange-meeting-rooms   # run a single task
+make single TASK=ds-sql-exercise   # run a single task
 ```
+
+> **Note**: The first run of any task takes 10-20 minutes to build the OpenHands runtime image. Subsequent runs start in seconds.
 
 ## Configuration
 
@@ -37,23 +39,21 @@ base_url = "https://api.openai.com/v1"
 api_key = "sk-..."
 ```
 
-`--agent-llm-config agent` maps to `[llm.agent]`, `--env-llm-config env` maps to `[llm.env]`.
-
-For mock mode, the config file is not needed.
+`--agent-llm-config agent` maps to `[llm.agent]`, `--env-llm-config env` maps to `[llm.env]`. For mock mode, the config file is not needed.
 
 ## Install
 
 ```bash
-make setup               # base: mock mode + scheduler
-make setup-full          # full: includes openhands (requires Python >=3.12)
+make setup-full          # full: submodule + openhands deps + docker base image
+# or:
+make setup               # base only: mock mode + scheduler
 ```
 
 Or manually:
 
 ```bash
 git submodule update --init --recursive
-uv sync                  # base
-uv sync --extra openhands  # with openhands
+uv sync --extra openhands  # requires Python >=3.12
 docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest
 ```
 

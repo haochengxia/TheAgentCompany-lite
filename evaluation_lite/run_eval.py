@@ -78,7 +78,7 @@ def run_solver(harness: BaseHarness, task_name: str, dependencies: list[str],
     state = harness.run_agent(instruction=instruction, max_iterations=100,
                               dependencies=dependencies)
 
-    if save_screenshots and state.screenshots:
+    if save_screenshots and getattr(state, 'screenshots', None):
         task_screenshots_dir = os.path.join(screenshots_dir, task_name)
         os.makedirs(task_screenshots_dir, exist_ok=True)
         for image_id, screenshot_data in enumerate(state.screenshots):
@@ -220,7 +220,8 @@ if __name__ == "__main__":
             sys.exit()
 
         harness = OpenHandsHarness(base_image=base_image, llm_config=agent_llm_config,
-                                   task_short_name=task_short_name, verbose=args.verbose)
+                                   task_short_name=task_short_name, verbose=args.verbose,
+                                   task_dir=task_dir)
         harness.start(mount_path=mount_path)
 
     elif args.harness == "docker":

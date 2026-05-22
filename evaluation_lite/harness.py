@@ -3,7 +3,7 @@
 Two implementations: DockerHarness (plain Docker, custom agents) and
 OpenHandsHarness (wraps OpenHands runtime, original behavior).
 """
-import asyncio, json, os, subprocess, tempfile, time, logging, sys
+import asyncio, json, os, shutil, subprocess, tempfile, time, logging, sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -113,15 +113,11 @@ class BaseHarness(ABC):
     def stop(self):
         pass
 
-    @abstractmethod
-    def run_agent(self, instruction, max_iterations=100):
+    def setup_task_files(self, task_dir: str):
         pass
 
     @abstractmethod
-    def run_command(self, command, timeout=300) -> CommandResult:
-        pass
-
-    def setup_task_files(self, task_dir):
+    def run_agent(self, instruction, max_iterations=100, **kwargs):
         pass
 
 
@@ -155,37 +151,137 @@ class DockerHarness(BaseHarness):
         return CommandResult(exit_code=result.returncode,
                              content=result.stdout + result.stderr)
 
-    def run_agent(self, instruction, max_iterations=100):
+    def run_agent(self, instruction, max_iterations=100, **kwargs):
         raise NotImplementedError("Subclass DockerHarness and override run_agent().")
 
 
 class OpenHandsHarness(BaseHarness):
 
     def __init__(self, base_image, llm_config=None, task_short_name="task",
-                 verbose=False, config=None):
+                 verbose=False, config=None, task_dir=None):
         self.base_image = base_image
         self.llm_config = llm_config
         self.task_short_name = task_short_name
         self.verbose = verbose
         self.config = config
+        self.task_dir = task_dir
         self._runtime = None
         self._state = None
+
+    def _build_task_image(self, task_dir: str) -> str:
+        """Build intermediate task image from base + task files.
+
+        The lite base image uses ONBUILD directives that expect task files
+        (evaluator.py, dependencies.yml, task.md) in the build context.
+        We satisfy those ONBUILDs by building from the task directory,
+        producing a task-specific image that OpenHands can then layer
+        its runtime on top of.
+        """
+        tag = f"tac-task-{self.task_short_name}:latest"
+        logger.info(f"Building task image {tag} from {task_dir}")
+
+        dockerfile_path = os.path.join(task_dir, "Dockerfile")
+        has_existing = os.path.exists(dockerfile_path)
+
+        if has_existing:
+            with open(dockerfile_path) as f:
+                original = f.read()
+            rewritten = []
+            for line in original.splitlines():
+                if line.strip().startswith("FROM"):
+                    rewritten.append(f"FROM {self.base_image}")
+                else:
+                    rewritten.append(line)
+            with open(dockerfile_path, "w") as f:
+                f.write("\n".join(rewritten))
+        else:
+            with open(dockerfile_path, "w") as f:
+                f.write(f"FROM {self.base_image}\n")
+
+        try:
+            result = subprocess.run(
+                ["docker", "build", "-t", tag, task_dir],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to build task image:\n{result.stderr[-2000:]}"
+                )
+        finally:
+            if has_existing:
+                with open(dockerfile_path, "w") as f:
+                    f.write(original)
+            else:
+                os.remove(dockerfile_path)
+
+        logger.info(f"Task image {tag} built successfully")
+        return tag
+
+    def _build_runtime_image(self, base_image: str) -> str:
+        """Pre-build the OpenHands runtime image on top of the task image.
+
+        OpenHands 0.42.0's DockerRuntimeBuilder generates a Dockerfile that
+        installs micromamba, poetry, playwright, etc. We build this ourselves
+        and pass runtime_container_image to skip OpenHands' internal build.
+        """
+        from openhands.runtime.utils.runtime_build import prep_build_folder, BuildFromImageType
+
+        tag = f"tac-runtime-{self.task_short_name}:latest"
+
+        result = subprocess.run(
+            ["docker", "images", "-q", tag],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.stdout.strip():
+            logger.info(f"Runtime image {tag} already exists, skipping build")
+            return tag
+
+        d = tempfile.mkdtemp(prefix="oh_runtime_")
+        try:
+            prep_build_folder(d, base_image, BuildFromImageType.SCRATCH, None)
+            logger.info(f"Building OpenHands runtime image {tag} (first run takes 10-20 min)...")
+            result = subprocess.run(
+                ["docker", "buildx", "build", "--progress=plain",
+                 "-t", tag, "--load", d],
+                capture_output=True, text=True, timeout=1800,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to build runtime image:\n{result.stderr[-2000:]}"
+                )
+            logger.info(f"Runtime image {tag} built successfully")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+        return tag
 
     def start(self, mount_path=None):
         from openhands.core.config import OpenHandsConfig, SandboxConfig
         from openhands.core.main import create_runtime
         from openhands.utils.async_utils import call_async_from_sync
+
+        effective_base = self.base_image
+        runtime_image = None
+
+        if self.task_dir and os.path.isdir(self.task_dir):
+            effective_base = self._build_task_image(self.task_dir)
+            runtime_image = self._build_runtime_image(effective_base)
+
+        sandbox = SandboxConfig(
+            base_container_image=effective_base,
+            use_host_network=True,
+            timeout=300,
+        )
+        if runtime_image:
+            sandbox.runtime_container_image = runtime_image
+
         config = OpenHandsConfig(
             run_as_openhands=False,
             max_iterations=100,
             save_trajectory_path=os.path.join(mount_path or "", f"traj_{self.task_short_name}.json") if mount_path else None,
             workspace_mount_path=mount_path,
             workspace_mount_path_in_sandbox="/outputs",
-            sandbox=SandboxConfig(
-                base_container_image=self.base_image,
-                use_host_network=True,
-                timeout=300,
-            ),
+            sandbox=sandbox,
         )
         config.set_llm_config(self.llm_config)
         runtime = create_runtime(config=config)
@@ -211,7 +307,7 @@ class OpenHandsHarness(BaseHarness):
         return CommandResult(exit_code=getattr(obs, 'exit_code', -1),
                              content=getattr(obs, 'content', ''))
 
-    def run_agent(self, instruction, max_iterations=100):
+    def run_agent(self, instruction, max_iterations=100, **kwargs):
         import asyncio
         from openhands.events.action import MessageAction
         from openhands.core.main import run_controller
