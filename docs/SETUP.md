@@ -70,6 +70,8 @@ api_key = "sk-..."
 
 The evaluation needs four web services running: GitLab, RocketChat, ownCloud, and Plane. Plus an api-server that manages service resets.
 
+**On-demand startup**: The harness automatically starts only the services needed by your task via `ensure_services()`. For example, a gitlab-only task will only start GitLab, not the full stack.
+
 ### Quick Start (Single Machine)
 
 ```bash

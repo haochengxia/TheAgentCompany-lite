@@ -17,6 +17,8 @@ Total: ~17.5 hours, ~700 GB disk.
 
 Each task declares its service dependencies in `dependencies.yml`. Tasks that use **different** services can run in parallel — they don't interfere. We exploit this to schedule non-conflicting tasks concurrently.
 
+Services are started on-demand by `ensure_services()` in `run_eval.py`, which reads the task's `dependencies.yml` and starts only the required docker-compose services (GitLab, RocketChat, ownCloud, Plane).
+
 ## Step 1: Group by Dependency
 
 Walk all task directories and group by their dependency tuple:
@@ -173,7 +175,7 @@ harness.py (~375 lines)
     ├── run_agent()             — execute task via run_controller
     └── run_command()           — docker exec directly into container
 
-run_eval.py (~392 lines)
+run_eval.py (~396 lines)
 ├── load_dependencies()         — read from host or container
 ├── init_task_env()             — set env vars, run init.sh
 ├── ensure_services()           — start docker-compose services on demand

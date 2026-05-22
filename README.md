@@ -9,7 +9,13 @@ A faster, parallelized evaluation infrastructure for [TheAgentCompany](https://g
 
 Uses the same [OpenHands](https://github.com/All-Hands-AI/OpenHands) config and task format as upstream — just swap the runner.
 
-See [docs/DESIGN.md](docs/DESIGN.md) for architecture and [docs/SETUP.md](docs/SETUP.md) for full setup instructions.
+Quick test with no external services needed:
+
+```bash
+make single TASK=ds-sql-exercise
+```
+
+See [docs/DESIGN.md](docs/DESIGN.md) for architecture and [docs/SETUP.md](docs/SETUP.md) for full setup instructions including service deployment.
 
 ## Quick Start
 
@@ -18,10 +24,12 @@ git clone git@github.com:illinoisdata/TheAgentCompany-lite.git && cd TheAgentCom
 make setup-full  # submodule + uv deps (with openhands) + docker base image
 make mock        # mock benchmark (no LLM, no services needed)
 make dry-run     # see execution plan
-make single TASK=ds-sql-exercise   # run a single task
+make single TASK=ds-sql-exercise   # quick real task (no external services needed)
 ```
 
 > **Note**: The first run of any task takes 10-20 minutes to build the OpenHands runtime image. Subsequent runs start in seconds.
+
+Tasks that depend on GitLab, RocketChat, ownCloud, or Plane need those services running first. See [docs/SETUP.md](#2-server-setup-services) for service deployment. The harness starts services on-demand via `ensure_services()` when you run a task that needs them.
 
 ## Configuration
 
@@ -62,10 +70,18 @@ docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest || make build-
 ## Usage
 
 ```bash
-# Mock benchmark (no LLM needed)
+# Mock benchmark (no LLM, no services needed)
 make mock
 
-# Specific tasks by name
+# Quick real task (no external services needed)
+make single TASK=ds-sql-exercise
+make single TASK=sde-install-go
+make single TASK=sde-install-openjdk
+
+# Tasks that need GitLab/RocketChat/ownCloud/Plane
+# (services must be running first, see SETUP.md)
+make single TASK=sde-add-wiki-page
+make single TASK=gitlab-create-repo-1
 make single TASK=admin-arrange-meeting-rooms
 
 # Multiple tasks
@@ -97,6 +113,9 @@ evaluation_lite/
   run_eval.py           # Single task execution pipeline
   run_eval_mock.py      # Mock executor for infra testing
   browsing.py           # Browser automation for pre-login
+
+.github/workflows/
+  e2e-test.yml          # CI: E2E test with on-demand service startup
 ```
 
 ## Makefile Targets
