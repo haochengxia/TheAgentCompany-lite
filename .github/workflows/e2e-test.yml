@@ -1,6 +1,8 @@
 name: E2E Test
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       task:
@@ -48,20 +50,24 @@ jobs:
           api_version = "2024-12-01-preview"
           TOML
 
-      - name: Start services
-        if: ${{ github.event.inputs.task != 'ds-sql-exercise' }}
+      - name: Resolve task
+        id: resolve
         run: |
-          TASK_DIR="TheAgentCompany/workspaces/tasks/${{ github.event.inputs.task }}"
+          TASK="${{ github.event.inputs.task || 'ds-sql-exercise' }}"
+          echo "task=$TASK" >> "$GITHUB_OUTPUT"
+
+      - name: Start services
+        if: ${{ steps.resolve.outputs.task != 'ds-sql-exercise' }}
+        run: |
+          TASK_DIR="TheAgentCompany/workspaces/tasks/${{ steps.resolve.outputs.task }}"
           SERVICES=$(grep -v '^#' "$TASK_DIR/dependencies.yml" | grep -v '^$' | sed 's/^- //')
           echo "Starting services: $SERVICES"
 
-          # Start required services via docker-compose
           export GITLAB_PORT=8929
           docker compose -p theagentcompany \
             -f TheAgentCompany/servers/docker-compose.yml \
             up -d $SERVICES
 
-          # Start minimal healthcheck server (satisfies reset.sh)
           cat > /tmp/healthcheck.py << 'PYEOF'
           from http.server import HTTPServer, BaseHTTPRequestHandler
           import urllib.request, json
@@ -78,7 +84,7 @@ jobs:
                               self.wfile.write(json.dumps({"status":"healthy"}).encode()); return
                           except: pass
                   self.send_response(503); self.end_headers()
-              def do_HEAD(self): self.do_GET()  # curl -I sends HEAD
+              def do_HEAD(self): self.do_GET()
               def do_POST(self): self.send_response(202); self.end_headers()
               def log_message(self, *a): pass
           HTTPServer(("0.0.0.0", 2999), H).serve_forever()
@@ -86,7 +92,6 @@ jobs:
           nohup python3 /tmp/healthcheck.py > /tmp/healthcheck.log 2>&1 &
           echo "Healthcheck PID: $!"
 
-          # Wait for services directly
           for svc in $SERVICES; do
             port=$(python3 -c "p={'gitlab':8929,'rocketchat':3000,'owncloud':8092,'plane':8091}; print(p['$svc'])")
             echo "Waiting for $svc (port $port)..."
@@ -103,7 +108,7 @@ jobs:
       - name: Run task
         run: |
           uv run python evaluation_lite/run_eval.py \
-            --task ${{ github.event.inputs.task }} \
+            --task ${{ steps.resolve.outputs.task }} \
             --agent-llm-config agent --env-llm-config env \
             --server-hostname localhost \
             --verbose \
@@ -142,5 +147,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-${{ github.event.inputs.task }}
+          name: e2e-${{ steps.resolve.outputs.task }}
           path: outputs/
