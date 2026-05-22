@@ -34,20 +34,32 @@ jobs:
       - name: Setup /etc/hosts
         run: echo "127.0.0.1 the-agent-company.com" | sudo tee -a /etc/hosts
 
-      - name: Start gitlab service
+      - name: Start services
         if: ${{ github.event.inputs.task != 'ds-sql-exercise' }}
         run: |
           export GITLAB_PORT=8929
+
+          # Start API server (needed for healthcheck/reset endpoints)
+          docker pull ghcr.io/theagentcompany/servers-api-server:1.0.0
+          docker run -d --name api-server --network host --restart no \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            ghcr.io/theagentcompany/servers-api-server:1.0.0
+
+          # Start gitlab
           docker compose -p theagentcompany \
             -f TheAgentCompany/servers/docker-compose.yml \
             up -d gitlab
-          echo "Waiting for gitlab to be healthy..."
+
+          # Wait for services via API server healthcheck
+          echo "Waiting for gitlab to be ready via API healthcheck..."
           for i in $(seq 1 36); do
-            if curl -sf http://the-agent-company.com:8929/ > /dev/null 2>&1; then
-              echo "GitLab is up!"
+            status=$(curl -s -o /dev/null -w "%{http_code}" \
+              http://localhost:2999/api/healthcheck/gitlab 2>/dev/null || echo "000")
+            if [ "$status" = "200" ]; then
+              echo "GitLab is healthy!"
               break
             fi
-            echo "  waiting... ($i/36)"
+            echo "  waiting... ($i/36) healthcheck=$status"
             sleep 10
           done
 
