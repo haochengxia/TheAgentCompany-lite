@@ -4,23 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       task:
-        description: 'Task to test'
+        description: 'Task name (e.g. ds-sql-exercise, sde-change-license-easy)'
         required: true
         default: 'ds-sql-exercise'
 
 jobs:
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           submodules: true
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
         run: uv python install 3.12
@@ -33,35 +31,6 @@ jobs:
 
       - name: Setup /etc/hosts
         run: echo "127.0.0.1 the-agent-company.com" | sudo tee -a /etc/hosts
-
-      - name: Start services
-        if: ${{ github.event.inputs.task != 'ds-sql-exercise' }}
-        run: |
-          export GITLAB_PORT=8929
-
-          # Start API server (needed for healthcheck/reset endpoints)
-          docker pull ghcr.io/theagentcompany/servers-api-server:1.0.0
-          docker run -d --name api-server --network host --restart no \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            ghcr.io/theagentcompany/servers-api-server:1.0.0
-
-          # Start gitlab
-          docker compose -p theagentcompany \
-            -f TheAgentCompany/servers/docker-compose.yml \
-            up -d gitlab
-
-          # Wait for services via API server healthcheck
-          echo "Waiting for gitlab to be ready via API healthcheck..."
-          for i in $(seq 1 36); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" \
-              http://localhost:2999/api/healthcheck/gitlab 2>/dev/null || echo "000")
-            if [ "$status" = "200" ]; then
-              echo "GitLab is healthy!"
-              break
-            fi
-            echo "  waiting... ($i/36) healthcheck=$status"
-            sleep 10
-          done
 
       - name: Write config.toml
         run: |
@@ -78,6 +47,57 @@ jobs:
           api_key = "${{ secrets.LITELLM_API_KEY }}"
           api_version = "2024-12-01-preview"
           TOML
+
+      - name: Start services
+        if: ${{ github.event.inputs.task != 'ds-sql-exercise' }}
+        run: |
+          TASK_DIR="TheAgentCompany/workspaces/tasks/${{ github.event.inputs.task }}"
+          SERVICES=$(grep -v '^#' "$TASK_DIR/dependencies.yml" | grep -v '^$' | sed 's/^- //')
+          echo "Starting services: $SERVICES"
+
+          # Start required services via docker-compose
+          export GITLAB_PORT=8929
+          docker compose -p theagentcompany \
+            -f TheAgentCompany/servers/docker-compose.yml \
+            up -d $SERVICES
+
+          # Start minimal healthcheck server (satisfies reset.sh)
+          cat > /tmp/healthcheck.py << 'PYEOF'
+          from http.server import HTTPServer, BaseHTTPRequestHandler
+          import urllib.request, json
+          PORTS = {"gitlab": 8929, "rocketchat": 3000, "owncloud": 8092, "plane": 8091}
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  p = self.path.strip("/").split("/")
+                  if len(p) == 3 and p[0] == "api" and p[1] == "healthcheck":
+                      svc = p[2]; port = PORTS.get(svc)
+                      if port:
+                          try:
+                              urllib.request.urlopen(f"http://the-agent-company.com:{port}/", timeout=10)
+                              self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+                              self.wfile.write(json.dumps({"status":"healthy"}).encode()); return
+                          except: pass
+                  self.send_response(503); self.end_headers()
+              def do_POST(self): self.send_response(202); self.end_headers()
+              def log_message(self, *a): pass
+          HTTPServer(("0.0.0.0", 2999), H).serve_forever()
+          PYEOF
+          nohup python3 /tmp/healthcheck.py > /tmp/healthcheck.log 2>&1 &
+          echo "Healthcheck PID: $!"
+
+          # Wait for services directly
+          for svc in $SERVICES; do
+            port=$(python3 -c "p={'gitlab':8929,'rocketchat':3000,'owncloud':8092,'plane':8091}; print(p['$svc'])")
+            echo "Waiting for $svc (port $port)..."
+            for i in $(seq 1 60); do
+              if curl -sf http://the-agent-company.com:$port/ > /dev/null 2>&1; then
+                echo "$svc is up!"
+                break
+              fi
+              if [ "$i" -eq 60 ]; then echo "Timed out waiting for $svc"; fi
+              sleep 10
+            done
+          done
 
       - name: Run task
         run: |
@@ -108,7 +128,7 @@ jobs:
               src = ev.get('source', '')
               action = ev.get('action', '')
               content = ev.get('content', '') or ev.get('command', '') or ev.get('thought', '') or ''
-              content = content.replace('\n', ' ')[:300]
+              content = content.replace(chr(10), ' ')[:300]
               if src == 'agent' or action in ('run', 'message', 'finish'):
                   tag = 'THINK' if action == 'message' and src == 'agent' else action.upper()
                   print(f'[{tag}] {content}')
@@ -121,5 +141,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-outputs-${{ github.event.inputs.task }}
+          name: e2e-${{ github.event.inputs.task }}
           path: outputs/
