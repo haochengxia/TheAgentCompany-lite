@@ -7,6 +7,8 @@ A faster, parallelized evaluation infrastructure for [TheAgentCompany](https://g
 
 **3.1 hours** instead of 17.5 hours. **4 GB** instead of 700 GB. Mock mode for 30-second infra testing.
 
+Uses the same [OpenHands](https://github.com/All-Hands-AI/OpenHands) config and task format as upstream — just swap the runner.
+
 See [docs/DESIGN.md](docs/DESIGN.md) for architecture and [docs/SETUP.md](docs/SETUP.md) for full setup instructions.
 
 ## Quick Start
@@ -18,6 +20,26 @@ make mock        # mock benchmark (no LLM, no services needed)
 make dry-run     # see execution plan
 make single TASK=admin-arrange-meeting-rooms   # run a single task
 ```
+
+## Configuration
+
+LLM config uses the same `config.toml` format as upstream OpenHands. Create it in the project root:
+
+```toml
+[llm.agent]
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-..."
+
+[llm.env]
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+api_key = "sk-..."
+```
+
+`--agent-llm-config agent` maps to `[llm.agent]`, `--env-llm-config env` maps to `[llm.env]`.
+
+For mock mode, the config file is not needed.
 
 ## Install
 

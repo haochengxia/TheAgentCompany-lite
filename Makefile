@@ -27,6 +27,7 @@ single:
 		--task $(TASK) \
 		--agent-llm-config agent --env-llm-config env \
 		--server-hostname localhost \
+		--verbose \
 		--outputs-path ./outputs
 
 clean:

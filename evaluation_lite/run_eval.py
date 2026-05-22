@@ -147,6 +147,8 @@ if __name__ == "__main__":
                         help="Build runtime image and exit (openhands harness only)")
     parser.add_argument("--service-instance", type=str, default=None,
                         help="JSON string with service instance info (multi-instance mode)")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Print agent thinking and actions in color")
     args = parser.parse_args()
 
     service_instance = None
@@ -218,7 +220,7 @@ if __name__ == "__main__":
             sys.exit()
 
         harness = OpenHandsHarness(base_image=base_image, llm_config=agent_llm_config,
-                                   task_short_name=task_short_name)
+                                   task_short_name=task_short_name, verbose=args.verbose)
         harness.start(mount_path=mount_path)
 
     elif args.harness == "docker":
