@@ -74,10 +74,27 @@ Dependencies → Groups → Rounds → Instance Assignment → Sequential Execut
 - TheAgentCompany services running (gitlab, rocketchat, owncloud, plane)
 - Python 3.10+ with `pyyaml`
 
+### Install (with uv)
+
+```bash
+# Base install (mock mode, scheduler)
+uv sync
+
+# With OpenHands (real benchmark, requires Python >=3.12)
+uv sync --extra openhands
+```
+
+### Install (without uv)
+
+```bash
+pip install pyyaml
+pip install openhands-ai==0.42.0  # only needed for real benchmark
+```
+
 ### Dry Run (see the plan without executing)
 
 ```bash
-python evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
   --agent-llm-config agent \
   --env-llm-config env \
   --dry-run
@@ -86,7 +103,7 @@ python evaluation_lite/scheduler.py \
 ### Mock Mode (infrastructure testing, no LLM)
 
 ```bash
-python evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
   --agent-llm-config agent \
   --env-llm-config env \
   --mock --mock-duration 5,8 \
@@ -96,7 +113,7 @@ python evaluation_lite/scheduler.py \
 ### Multi-Instance (6 instances)
 
 ```bash
-python evaluation_lite/scheduler.py \
+uv run python evaluation_lite/scheduler.py \
   --agent-llm-config agent \
   --env-llm-config env \
   --server-hostname tac_test \
@@ -113,7 +130,7 @@ Instance layout:
 ### Single Task (debugging)
 
 ```bash
-python evaluation_lite/run_eval.py \
+uv run python evaluation_lite/run_eval.py \
   --task-dir workspaces/tasks/gitlab-create-repo-1 \
   --agent-llm-config agent \
   --env-llm-config env \

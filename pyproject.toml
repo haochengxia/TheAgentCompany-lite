@@ -1,0 +1,16 @@
+[project]
+name = "theagentcompany-lite"
+version = "2.0.0"
+description = "Parallelized evaluation infrastructure for TheAgentCompany benchmarks"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+openhands = [
+    "openhands-ai==0.42.0; python_version >= '3.12'",
+]
+
+[dependency-groups]
+dev = []
