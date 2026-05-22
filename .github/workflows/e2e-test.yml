@@ -1,0 +1,77 @@
+name: E2E Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Task to test'
+        required: true
+        default: 'ds-sql-exercise'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra openhands
+
+      - name: Build base image
+        run: make build-base
+
+      - name: Write config.toml
+        run: |
+          cat > config.toml << 'TOML'
+          [llm.agent]
+          model = "${{ secrets.LITELLM_MODEL }}"
+          base_url = "${{ secrets.LITELLM_BASE_URL }}"
+          api_key = "${{ secrets.LITELLM_API_KEY }}"
+          api_version = "2024-12-01-preview"
+
+          [llm.env]
+          model = "${{ secrets.LITELLM_MODEL }}"
+          base_url = "${{ secrets.LITELLM_BASE_URL }}"
+          api_key = "${{ secrets.LITELLM_API_KEY }}"
+          api_version = "2024-12-01-preview"
+          TOML
+
+      - name: Run task
+        run: |
+          uv run python evaluation_lite/run_eval.py \
+            --task ${{ github.event.inputs.task }} \
+            --agent-llm-config agent --env-llm-config env \
+            --server-hostname localhost \
+            --outputs-path ./outputs
+
+      - name: Check results
+        run: |
+          echo "=== Output files ==="
+          ls -la ./outputs/ || true
+          echo ""
+          echo "=== Eval result ==="
+          cat ./outputs/eval_*.json || echo "No eval file found"
+          echo ""
+          echo "=== State file size ==="
+          wc -c ./outputs/state_*.json || true
+          echo ""
+          echo "=== Trajectory file size ==="
+          wc -c ./outputs/traj_*.json || true
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-outputs
+          path: outputs/
