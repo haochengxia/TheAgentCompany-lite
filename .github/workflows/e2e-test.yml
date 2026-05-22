@@ -78,6 +78,7 @@ jobs:
                               self.wfile.write(json.dumps({"status":"healthy"}).encode()); return
                           except: pass
                   self.send_response(503); self.end_headers()
+              def do_HEAD(self): self.do_GET()  # curl -I sends HEAD
               def do_POST(self): self.send_response(202); self.end_headers()
               def log_message(self, *a): pass
           HTTPServer(("0.0.0.0", 2999), H).serve_forever()
