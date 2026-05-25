@@ -33,7 +33,7 @@ Tasks that depend on GitLab, RocketChat, ownCloud, or Plane need those services 
 
 ## Configuration
 
-LLM config uses the same `config.toml` format as upstream OpenHands. Create it in the project root:
+LLM config uses the same `config.toml` format as upstream OpenHands. Create it in the project root (after cloning and `make setup-full`):
 
 ```toml
 [llm.agent]
@@ -47,7 +47,39 @@ base_url = "https://api.openai.com/v1"
 api_key = "sk-..."
 ```
 
+For Azure OpenAI:
+
+```toml
+[llm.agent]
+model = "azure/<your-deployment-name>"
+base_url = "https://<your-resource>.cognitiveservices.azure.com"
+api_key = "<your-api-key>"
+api_version = "2024-12-01-preview"
+
+[llm.env]
+model = "azure/<your-deployment-name>"
+base_url = "https://<your-resource>.cognitiveservices.azure.com"
+api_key = "<your-api-key>"
+api_version = "2024-12-01-preview"
+```
+
+> **Important:** The `model` field must start with `azure/` prefix so litellm routes to Azure OpenAI. `base_url` should be just the endpoint, not the full deployment path.
+
 `--agent-llm-config agent` maps to `[llm.agent]`, `--env-llm-config env` maps to `[llm.env]`. For mock mode, the config file is not needed.
+
+## Prerequisites
+
+| Requirement | Linux (Ubuntu/Debian) | macOS |
+|---|---|---|
+| **Docker** 24+ | `sudo apt-get install -y docker.io` | [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) (includes BuildX + Compose) |
+| **Docker BuildX** | `sudo apt-get install -y docker-buildx-plugin` | Included in Docker Desktop |
+| **Docker Compose v2** | `sudo apt-get install -y docker-compose-v2` | Included in Docker Desktop |
+| **Python** 3.12+ | System package or pyenv | `brew install python@3.12` |
+| **uv** | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `brew install uv` or same curl command |
+
+> **Quick install (Linux):** `sudo apt-get install -y docker.io docker-buildx-plugin docker-compose-v2`
+>
+> **Quick install (macOS):** Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) + `brew install uv`
 
 ## Install
 

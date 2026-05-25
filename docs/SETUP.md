@@ -30,16 +30,32 @@ This guide walks through everything needed to run the lite evaluation, from a fr
 ### Software
 
 ```bash
-# Docker (required)
+# Docker + BuildX (required)
 docker --version          # 24+
+docker buildx version     # required for runtime image builds
 docker compose version    # v2+
 
 # Python (required)
 python3 --version         # 3.12+ (required by OpenHands)
 
 # uv (package manager)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh    # or: brew install uv (macOS)
+source ~/.local/bin/env   # add uv to PATH
 ```
+
+> **Installing Docker on Linux (Ubuntu/Debian):**
+> ```bash
+> sudo apt-get install -y docker.io docker-compose-v2 docker-buildx-plugin
+> sudo systemctl start docker
+> sudo usermod -aG docker $USER
+> # Log out and back in for group change to take effect
+> ```
+
+> **Installing Docker on macOS:**
+> Install [Docker Desktop](https://docs.docker.com/desktop/setup/install/mac-install/) — it includes Docker Engine, BuildX, and Compose.
+> ```bash
+> brew install --cask docker
+> ```
 
 ### LLM API Keys
 
@@ -48,7 +64,9 @@ You need two LLM configs (can point to the same model):
 - **Agent LLM**: the model that solves tasks
 - **Environment LLM**: used by NPCs and evaluators (typically a cheaper model)
 
-Create `config.toml` in the project root:
+Create `config.toml` in the project root (after cloning + `git submodule update --init`):
+
+**OpenAI:**
 
 ```toml
 [llm.agent]
@@ -61,6 +79,24 @@ model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
 api_key = "sk-..."
 ```
+
+**Azure OpenAI:**
+
+```toml
+[llm.agent]
+model = "azure/<your-deployment-name>"
+base_url = "https://<your-resource>.cognitiveservices.azure.com"
+api_key = "<your-api-key>"
+api_version = "2024-12-01-preview"
+
+[llm.env]
+model = "azure/<your-deployment-name>"
+base_url = "https://<your-resource>.cognitiveservices.azure.com"
+api_key = "<your-api-key>"
+api_version = "2024-12-01-preview"
+```
+
+> **Important:** The `model` field **must** start with `azure/` so that litellm (the LLM proxy used by OpenHands) routes requests to the Azure OpenAI API instead of the standard OpenAI API. The `base_url` should be just the endpoint (e.g., `https://myresource.cognitiveservices.azure.com`), **not** the full deployment path.
 
 `config.toml` is gitignored — your API keys stay local.
 
@@ -543,4 +579,30 @@ uv run python evaluation_lite/scheduler.py \
     --agent-llm-config agent --env-llm-config env \
     --mock --mock-duration 2,3 \
     --outputs-path /tmp/mock_debug
+```
+
+### "unknown flag: --progress" or "unknown command: docker buildx"
+
+The OpenHands runtime image build requires `docker buildx`. Install it:
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install -y docker-buildx-plugin
+
+# macOS (Docker Desktop includes buildx — make sure it's running)
+docker buildx install
+```
+
+### "No module named 'openhands'"
+
+```bash
+uv sync --extra openhands    # not: pip install openhands-ai
+```
+
+### `sed: command a expects \` followed by text` or `undefined label` on macOS
+
+This was a bug in the Makefile (BSD sed `a` command syntax differs from GNU sed). It has been fixed by switching to `perl -pi` for line insertion. Make sure you have the latest version:
+
+```bash
+git pull origin main
 ```

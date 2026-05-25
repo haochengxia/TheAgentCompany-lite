@@ -1,0 +1,72 @@
+name: macOS CI
+
+on:
+  push:
+    branches: [main, 'docs/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  setup-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra openhands
+
+      - name: Verify tasks available
+        run: |
+          python3 -c "
+          from pathlib import Path
+          tasks = Path('TheAgentCompany/workspaces/tasks')
+          count = sum(1 for d in tasks.iterdir() if d.is_dir()) if tasks.exists() else 0
+          print(f'Tasks: {count}')
+          assert count > 0, 'No tasks found'
+          "
+
+      - name: Verify Makefile macOS compat (perl -pi)
+        run: |
+          # Test that build-base patching commands work on macOS (BSD sed + perl)
+          echo 'FROM python:3.12' > /tmp/test-sed.Dockerfile
+          echo 'RUN pip install litellm==1.23.16' >> /tmp/test-sed.Dockerfile
+
+          # First sed (replace FROM line) — writes to a new file, so BSD/GNU compat is fine
+          sed 's|^FROM python:3.12$|FROM python:3.12-slim-bookworm|' \
+            /tmp/test-sed.Dockerfile > /tmp/tac-base.Dockerfile
+
+          # Second: append line after match — use perl for BSD/GNU compat
+          perl -pi -e 'print "RUN pip install \"setuptools<70\"\n" if /RUN pip install litellm==1.23.16/' \
+            /tmp/tac-base.Dockerfile
+
+          echo "=== Patched Dockerfile ==="
+          cat /tmp/tac-base.Dockerfile
+
+          # Verify both lines are present
+          grep -q 'python:3.12-slim-bookworm' /tmp/tac-base.Dockerfile
+          grep -q 'setuptools<70' /tmp/tac-base.Dockerfile
+
+      - name: Run mock benchmark (fast)
+        run: |
+          uv run python evaluation_lite/scheduler.py \
+            --agent-llm-config agent --env-llm-config env \
+            --mock --mock-duration 2,3 \
+            --outputs-path ./outputs_mock
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Check mock results
+        if: always()
+        run: |
+          echo "=== Mock summary ==="
+          cat outputs_mock/summary.json 2>/dev/null || echo "No mock summary"
