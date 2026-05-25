@@ -142,7 +142,7 @@ The gap between theoretical 6x and actual 2.5x comes from gitlab reset overhead 
 
 **Lite**: One shared base image with a three-stage build:
 
-1. **Base image** (`ghcr.io/illinoisdata/theagentcompany-lite-base:latest`, ~1.2 GB) — Python 3.12 (Debian Bookworm) + common libraries + NPC setup + evaluation utilities. Contains ONBUILD directives for task files.
+1. **Base image** (`ghcr.io/haochengxia/theagentcompany-lite-base:latest`, ~1.2 GB) — Python 3.12 (Debian Bookworm) + common libraries + NPC setup + evaluation utilities. Contains ONBUILD directives for task files.
 
 2. **Task image** (`tac-task-{name}:latest`, built on first run per task) — Layers task-specific files (evaluator, dependencies, task.md) on top of base image via the ONBUILD mechanism. Uses the task directory's own Dockerfile but rewrites `FROM` to point at the lite base image.
 

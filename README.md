@@ -62,7 +62,7 @@ Or manually:
 ```bash
 git submodule update --init --recursive
 uv sync --extra openhands  # requires Python >=3.12
-docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest || make build-base
+docker pull ghcr.io/haochengxia/theagentcompany-lite-base:latest || make build-base
 ```
 
 > **Note**: If `docker pull` fails (private registry or no access), `make build-base` builds the image locally from source (~5 min first time).

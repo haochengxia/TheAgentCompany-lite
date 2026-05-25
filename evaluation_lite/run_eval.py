@@ -12,7 +12,7 @@ from harness import BaseHarness, OpenHandsHarness, DockerHarness
 
 logger = logging.getLogger(__name__)
 
-BASE_IMAGE = os.environ.get("TAC_BASE_IMAGE", "ghcr.io/illinoisdata/theagentcompany-lite-base:latest")
+BASE_IMAGE = os.environ.get("TAC_BASE_IMAGE", "ghcr.io/haochengxia/theagentcompany-lite-base:latest")
 
 COMPOSE_SERVICE_MAP = {
     "gitlab": ["gitlab"],

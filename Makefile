@@ -3,19 +3,19 @@
 setup:
 	git submodule update --init --recursive
 	uv sync
-	docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest || $(MAKE) build-base
+	docker pull ghcr.io/haochengxia/theagentcompany-lite-base:latest || $(MAKE) build-base
 
 setup-full:
 	git submodule update --init --recursive
 	uv sync --extra openhands
-	docker pull ghcr.io/illinoisdata/theagentcompany-lite-base:latest || $(MAKE) build-base
+	docker pull ghcr.io/haochengxia/theagentcompany-lite-base:latest || $(MAKE) build-base
 
 build-base:
 	@echo "Building base image locally (first time: ~5 min)..."
 	sed 's|^FROM python:3.12$$|FROM python:3.12-slim-bookworm|' \
 		TheAgentCompany/workspaces/base_image/Dockerfile > /tmp/tac-base.Dockerfile
-	sed -i '/RUN pip install litellm==1.23.16/a RUN pip install "setuptools<70"' /tmp/tac-base.Dockerfile
-	docker build -t ghcr.io/illinoisdata/theagentcompany-lite-base:latest \
+	sed -i.bak '/RUN pip install litellm==1.23.16/a RUN pip install "setuptools<70"' /tmp/tac-base.Dockerfile && rm -f /tmp/tac-base.Dockerfile.bak
+	docker build -t ghcr.io/haochengxia/theagentcompany-lite-base:latest \
 		-f /tmp/tac-base.Dockerfile TheAgentCompany/workspaces/base_image/
 	rm -f /tmp/tac-base.Dockerfile
 
